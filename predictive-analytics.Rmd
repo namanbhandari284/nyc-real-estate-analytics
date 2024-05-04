@@ -1,0 +1,127 @@
+---
+title: "Assignment4"
+author: "Group 2"
+date: "2023-11-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(stringr)
+library(ggplot2)
+library(readr)
+library(data.table)
+library(dplyr)
+library(lubridate)
+library(tsibble)
+library(fabletools)
+library(fable)
+library(forecast)
+
+
+##### if you want to experiment with datasets from the book: Hyndman and Athanasopoulos (2023) Forecasting: Principles and Practice (3rd ed) 
+library(tsibbledata)
+```
+
+
+## Loading Data from csv file
+
+```{r cars}
+nyctrans <- fread ("NYC_TRANSACTION_DATA.csv", header = TRUE)
+nycneighb <- fread("NEIGHBORHOOD.csv", header = TRUE)
+nycborough <- fread("BOROUGH.csv", header = TRUE)
+nycbldcls <- fread("BUILDING_CLASS.csv", header = TRUE)
+```
+
+## connect the data
+
+```{r pressure, echo=FALSE}
+nyctrans2 <- nyctrans %>% inner_join(y=nycneighb, by="NEIGHBORHOOD_ID")%>%
+inner_join(y=nycborough, by="BOROUGH_ID") %>%
+inner_join(y=nycbldcls,by=c("BUILDING_CLASS_FINAL_ROLL"="BUILDING_CODE_ID"))
+```
+
+## Filter the data to contain
+
+```{r}
+nyctrans3 <- filter(nyctrans2, BOROUGH_ID == 2 & NEIGHBORHOOD_ID %in% c(250))
+## filter the price less than 250000 and feet equal to 0
+nyctrans4 <- filter(nyctrans3, SALE_PRICE >= 25000 & GROSS_SQUARE_FEET != 0)
+nyctrans4$Revenue <- nyctrans4$SALE_PRICE * 0.15 * 0.05
+```
+
+```{r}
+#nyctrans4$SALE_DATE <- paste0(year(nyctrans4$SALE_DATE),"/0",quarter(nyctrans4$SALE_DATE))
+nyctrans4$SALE_DATE <- format(nyctrans4$SALE_DATE,"%Y %m")
+```
+
+## data cleaning
+```{r}
+nyctrans5 <- nyctrans4 %>%
+  group_by(SALE_DATE) %>%
+  summarise(
+    Total_Revenue = sum(Revenue)
+  ) %>%
+  arrange(SALE_DATE)
+nyctrans5$Total_Revenue <- as.double(nyctrans5$Total_Revenue)
+time_series <- as_tsibble(ts(nyctrans5$Total_Revenue,start = c(2003,1),end = c(2021,12),frequency = 12))
+time_series.t <- head(time_series,204)  # storing first 130 observations in training set
+time_series.f <- tail(time_series,24)
+```
+
+```{r}
+autoplot(time_series.t)
+```
+
+
+```{r}
+# Single Exponential Model
+model1 <- time_series.t %>% model(ETS(value ~ error("A") + trend("N") + season("N")))
+report(model1)
+fabletools::accuracy(model1) 
+```
+
+```{r}
+model2 <- time_series.t %>% model(ETS(value ~ error("A") + trend("A") + season("N")))
+report(model2)
+fabletools::accuracy(model2) 
+```
+
+```{r}
+model3 <- time_series.t %>% model(ETS(value ~ error("A") + trend("M") + season("M")))
+report(model3)
+fabletools::accuracy(model3)
+```
+
+```{r}
+y <- model2 %>% forecast( new_data = time_series.f)
+autoplot(y)
+
+model2 %>% forecast( new_data = time_series.f) %>% autoplot(time_series)
+
+y %>% autoplot(time_series)
+```
+
+```{r}
+### create moving averages of order 3, 5, and 7
+air_ma3 <- ma(time_series.f,3)
+air_ma5 <- ma(time_series.f,5)
+air_ma7 <- ma(time_series.f,7)
+plot(time_series.f) 
+lines(air_ma3,col='blue', lwd=2)
+plot(time_series.f) 
+lines(air_ma5,col='red', lwd=2)
+plot(time_series.f) 
+lines(air_ma7,col='darkgreen', lwd=2)
+```
+
+#forecast using MA
+```{r}
+fit2 <- predict(air_ma5, 5)
+predict
+plot(time_series)
+lines(time_series.t,col='green')
+lines(time_series.f,col='red')
+lines(fit2$mean,col='blue')
+```
